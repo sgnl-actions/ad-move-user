@@ -55,10 +55,10 @@ describe('AD Move Object Script', () => {
       expect(result.newDN).toBe('CN=John Doe,OU=DisabledUsers,DC=example,DC=com');
       expect(result.moved).toBe(true);
       expect(result.renamed).toBe(false);
+      // ldapts modifyDN takes 2 params: currentDN and full newDN
       expect(mockModifyDN).toHaveBeenCalledWith(
         'CN=John Doe,OU=Users,DC=example,DC=com',
-        'CN=John Doe',
-        'OU=DisabledUsers,DC=example,DC=com'
+        'CN=John Doe,OU=DisabledUsers,DC=example,DC=com'
       );
     });
 
@@ -76,10 +76,10 @@ describe('AD Move Object Script', () => {
       expect(result.newDN).toBe('CN=John Doe (Disabled),OU=DisabledUsers,DC=example,DC=com');
       expect(result.moved).toBe(true);
       expect(result.renamed).toBe(true);
+      // ldapts modifyDN takes 2 params: currentDN and full newDN
       expect(mockModifyDN).toHaveBeenCalledWith(
         'CN=John Doe,OU=Users,DC=example,DC=com',
-        'CN=John Doe (Disabled)',
-        'OU=DisabledUsers,DC=example,DC=com'
+        'CN=John Doe (Disabled),OU=DisabledUsers,DC=example,DC=com'
       );
     });
 
@@ -93,10 +93,10 @@ describe('AD Move Object Script', () => {
 
       expect(result.status).toBe('success');
       expect(result.newDN).toBe('OU=SalesTeam,OU=ArchivedDepartments,DC=example,DC=com');
+      // ldapts modifyDN takes 2 params: currentDN and full newDN
       expect(mockModifyDN).toHaveBeenCalledWith(
         'OU=SalesTeam,OU=Departments,DC=example,DC=com',
-        'OU=SalesTeam',
-        'OU=ArchivedDepartments,DC=example,DC=com'
+        'OU=SalesTeam,OU=ArchivedDepartments,DC=example,DC=com'
       );
     });
 
@@ -112,10 +112,10 @@ describe('AD Move Object Script', () => {
       expect(result.status).toBe('success');
       expect(result.newDN).toBe('OU=SalesTeam (Archived),OU=ArchivedDepartments,DC=example,DC=com');
       expect(result.renamed).toBe(true);
+      // ldapts modifyDN takes 2 params: currentDN and full newDN
       expect(mockModifyDN).toHaveBeenCalledWith(
         'OU=SalesTeam,OU=Departments,DC=example,DC=com',
-        'OU=SalesTeam (Archived)',
-        'OU=ArchivedDepartments,DC=example,DC=com'
+        'OU=SalesTeam (Archived),OU=ArchivedDepartments,DC=example,DC=com'
       );
     });
 

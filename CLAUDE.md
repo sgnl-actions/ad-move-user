@@ -49,10 +49,11 @@ npm run lint
 
 ### LDAP modifyDN Operation
 
-The action uses `client.modifyDN(objectDN, newRDN, newParentDN)` to move objects:
-- `objectDN`: The current full DN of the object
-- `newRDN`: The new relative DN (e.g., "CN=John Doe" or "CN=John Doe (Disabled)")
-- `newParentDN`: The target container/OU DN
+The action uses `client.modifyDN(currentDN, newDN)` to move objects:
+- `currentDN`: The current full DN of the object
+- `newDN`: The complete new DN including parent (e.g., "CN=John Doe,OU=DisabledUsers,DC=example,DC=com")
+
+Note: The ldapts library accepts the full new DN as the second parameter, not separate RDN and parent parameters.
 
 ### RDN Extraction
 

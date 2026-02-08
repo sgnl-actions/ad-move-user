@@ -147,7 +147,9 @@ export default {
       console.log('Successfully authenticated to LDAP server');
 
       console.log(`Executing modifyDN: moving "${objectDN}" to "${newDN}"`);
-      await client.modifyDN(objectDN, newRDN, newParentDN);
+      // ldapts modifyDN signature: modifyDN(currentDN, newDN, controls?)
+      // newDN is the complete new Distinguished Name including the new parent
+      await client.modifyDN(objectDN, newDN);
 
       console.log(`Successfully moved object to: ${newDN}`);
       return {
