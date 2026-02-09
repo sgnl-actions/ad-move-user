@@ -17,14 +17,14 @@ inputs:
     description: New name for the object (without prefix like CN= or OU=). If omitted, keeps current name
     required: false
 
-  address:
-    type: text
-    description: Optional LDAP/LDAPS URL override (e.g., ldaps://dc.example.com:636)
-    required: false
-
   dry_run:
     type: boolean
     description: When true, validates parameters and logs intended actions without making changes to Active Directory
+    required: false
+
+  address:
+    type: text
+    description: Optional LDAP server URL override
     required: false
 
 outputs:
