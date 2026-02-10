@@ -1,6 +1,6 @@
 # AD Move User
 
-Move a user to a new parent container/OU in Active Directory via LDAP.
+Move a user to a new parent container/OU in Active Directory via LDAP/LDAPS.
 
 ## Overview
 
