@@ -108,10 +108,11 @@ Result: OU moved to `OU=SalesTeam,OU=ArchivedDepartments,DC=example,DC=com`
 
 ### Retryable Errors
 
-The framework automatically retries on transient errors such as:
-- Network connectivity issues
-- LDAP server temporarily unavailable
-- Connection timeouts
+| Error | Description |
+|-------|-------------|
+| Network timeout | Domain Controller unreachable |
+| Connection refused | LDAP service not running |
+| Server busy | DC under heavy load |
 
 ### Fatal Errors
 
