@@ -1,7 +1,7 @@
 {
-  "name": "@sgnl-actions/ad-move-object",
+  "name": "@sgnl-actions/ad-move-user",
   "version": "1.0.0",
-  "description": "Move any Active Directory object to a new parent container/OU",
+  "description": "Move a user to a new parent container/OU in Active Directory",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

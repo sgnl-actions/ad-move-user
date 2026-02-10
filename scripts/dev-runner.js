@@ -29,7 +29,8 @@ const mockContext = {
 // Action-specific parameters - customize these for your test
 // Example: Move user to DisabledUsers OU and optionally rename
 const mockParams = {
-  objectDN: 'CN=John Smith,OU=Users,DC=corp,DC=example,DC=com',
+  baseDN: 'DC=corp,DC=example,DC=com',
+  samAccountName: 'jsmith',
   newParentDN: 'OU=DisabledUsers,DC=corp,DC=example,DC=com',
   // newName: 'John Smith (Disabled)',  // Optional: rename during move
   dry_run: process.env.DRY_RUN === 'true',

@@ -31,13 +31,54 @@ function getBaseURL(params, context) {
 }
 
 /**
- * Active Directory Move Object Action
+ * Active Directory Move User Action
  *
- * Moves any Active Directory object (users, groups, OUs, computers, etc.)
- * to a new parent container/OU using the LDAP modifyDN operation.
- * Optionally supports renaming the object during the move.
+ * Moves a user to a new parent container/OU in Active Directory using the LDAP modifyDN operation.
+ * Optionally supports renaming the user during the move.
  */
 
+
+/**
+ * Escape special characters in LDAP filter values to prevent injection.
+ *
+ * @param {string} str - The string to escape
+ * @returns {string} The escaped string safe for use in LDAP filters
+ */
+function escapeLDAPFilter(str) {
+  return str.replace(/[\\*()]/g, (char) => '\\' + char.charCodeAt(0).toString(16).padStart(2, '0'));
+}
+
+/**
+ * Find a user's Distinguished Name by searching for their sAMAccountName.
+ *
+ * @param {Client} client - Bound ldapts Client instance
+ * @param {string} baseDN - Base DN to search from
+ * @param {string} samAccountName - User's sAMAccountName
+ * @returns {Promise<string>} The user's Distinguished Name
+ * @throws {Error} If user not found or multiple users found
+ */
+async function findUserDN(client, baseDN, samAccountName) {
+  console.log(`Searching for user with sAMAccountName: ${samAccountName}`);
+
+  const escapedSamAccountName = escapeLDAPFilter(samAccountName);
+  const { searchEntries } = await client.search(baseDN, {
+    scope: 'sub',
+    filter: `(&(objectClass=user)(sAMAccountName=${escapedSamAccountName}))`,
+    attributes: ['distinguishedName']
+  });
+
+  if (!searchEntries || searchEntries.length === 0) {
+    throw new Error(`User not found with sAMAccountName: ${samAccountName}`);
+  }
+
+  if (searchEntries.length > 1) {
+    throw new Error(`Multiple users found with sAMAccountName: ${samAccountName}. Expected exactly one.`);
+  }
+
+  const userDN = searchEntries[0].dn;
+  console.log(`Found user DN: ${userDN}`);
+  return userDN;
+}
 
 /**
  * Extract the RDN (Relative Distinguished Name) from a full DN.
@@ -70,6 +111,9 @@ function extractRDNPrefix(dn) {
  * @param {Client} client - The ldapts client
  */
 async function safeUnbind(client) {
+  if (!client) {
+    return;
+  }
   try {
     await client.unbind();
   } catch (unbindError) {
@@ -79,66 +123,54 @@ async function safeUnbind(client) {
 
 var script = {
   /**
-   * Main execution handler - moves an object in Active Directory.
+   * Main execution handler - moves a user in Active Directory.
    *
    * Uses the LDAP modifyDN operation which can:
-   * - Move an object to a new parent container/OU
-   * - Rename an object (change its RDN)
+   * - Move a user to a new parent container/OU
+   * - Rename a user (change their RDN)
    * - Do both simultaneously
    *
    * @param {Object} params - Job input parameters
-   * @param {string} params.objectDN - Current Distinguished Name of the object to move
-   * @param {string} params.newParentDN - Target container/OU DN to move the object into
-   * @param {string} [params.newName] - New name for the object (without prefix). If omitted, keeps current name
+   * @param {string} params.baseDN - Base DN to search for the user
+   * @param {string} params.samAccountName - User's sAMAccountName to lookup
+   * @param {string} params.newParentDN - Target container/OU DN to move the user into
+   * @param {string} [params.newName] - New name for the user (without prefix). If omitted, keeps current name
    * @param {string} [params.address] - Optional LDAP server URL override
    * @param {boolean} [params.dry_run] - If true, validate without making changes
    * @param {Object} context - Execution context with environment and secrets
    * @returns {Object} Job results including status, previousDN, newDN, and moved flag
    */
   invoke: async (params, context) => {
-    console.log('Starting Active Directory move object operation');
+    console.log('Starting Active Directory move user operation');
 
-    const { objectDN, newParentDN, newName, dry_run = false } = params;
+    const { baseDN, samAccountName, newParentDN, newName, dry_run = false } = params;
 
     // Validate required inputs
-    if (!objectDN) {
-      throw new Error('objectDN is required');
+    if (!baseDN) {
+      throw new Error('baseDN is required');
+    }
+    if (!samAccountName) {
+      throw new Error('samAccountName is required');
     }
     if (!newParentDN) {
       throw new Error('newParentDN is required');
     }
 
-    // Extract and validate the current RDN
-    const currentRDN = extractRDN(objectDN);
-    if (!currentRDN) {
-      throw new Error('Invalid objectDN format: could not extract RDN');
-    }
-
-    // Determine the new RDN (either keep current or use newName with correct prefix)
-    let newRDN = currentRDN;
-    const renamed = !!newName;
-    if (newName) {
-      const prefix = extractRDNPrefix(objectDN);
-      newRDN = `${prefix}${newName}`;
-      console.log(`Object will be renamed from "${currentRDN}" to "${newRDN}"`);
-    }
-
-    // Construct the new full DN
-    const newDN = `${newRDN},${newParentDN}`;
-
-    console.log(`Planning move: ${objectDN} -> ${newDN}`);
+    console.log(`Planning to move user "${samAccountName}" to "${newParentDN}"`);
 
     // Handle dry run - validate and return without making changes
     if (dry_run) {
       console.log('DRY RUN: No changes will be made to Active Directory');
-      console.log(`Would move: ${objectDN}`);
-      console.log(`To: ${newDN}`);
       return {
         status: 'dry_run_completed',
-        previousDN: objectDN,
-        newDN,
+        baseDN,
+        samAccountName,
+        userDN: null,
+        previousDN: null,
+        newDN: null,
+        newParentDN,
         moved: false,
-        renamed
+        renamed: !!newName
       };
     }
 
@@ -176,22 +208,44 @@ var script = {
       await client.bind(bindDN, bindPassword);
       console.log('Successfully authenticated to LDAP server');
 
-      console.log(`Executing modifyDN: moving "${objectDN}" to "${newDN}"`);
+      // Lookup user DN by sAMAccountName
+      const userDN = await findUserDN(client, baseDN, samAccountName);
+
+      // Extract and validate the current RDN
+      const currentRDN = extractRDN(userDN);
+      if (!currentRDN) {
+        throw new Error('Invalid userDN format: could not extract RDN');
+      }
+
+      // Determine the new RDN (either keep current or use newName with correct prefix)
+      let newRDN = currentRDN;
+      const renamed = !!newName;
+      if (newName) {
+        const prefix = extractRDNPrefix(userDN);
+        newRDN = `${prefix}${newName}`;
+        console.log(`User will be renamed from "${currentRDN}" to "${newRDN}"`);
+      }
+
+      // Construct the new full DN
+      const newDN = `${newRDN},${newParentDN}`;
+
+      console.log(`Executing modifyDN: moving "${userDN}" to "${newDN}"`);
       // ldapts modifyDN signature: modifyDN(currentDN, newDN, controls?)
       // newDN is the complete new Distinguished Name including the new parent
-      await client.modifyDN(objectDN, newDN);
+      await client.modifyDN(userDN, newDN);
 
-      console.log(`Successfully moved object to: ${newDN}`);
+      console.log(`Successfully moved user to: ${newDN}`);
       return {
         status: 'success',
-        previousDN: objectDN,
+        userDN,
+        previousDN: userDN,
         newDN,
         moved: true,
         renamed,
         address
       };
     } catch (error) {
-      console.error(`Failed to move object: ${error.message}`);
+      console.error(`Failed to move user: ${error.message}`);
       throw error;
     } finally {
       await safeUnbind(client);
@@ -203,13 +257,14 @@ var script = {
    *
    * @param {Object} params - Original params plus error information
    * @param {Error} params.error - The error that occurred
-   * @param {string} params.objectDN - The object DN that was being moved
+   * @param {string} params.baseDN - The base DN being searched
+   * @param {string} params.samAccountName - The sAMAccountName being looked up
    * @param {Object} _context - Execution context (unused)
    * @throws {Error} Re-throws with appropriate classification
    */
   error: async (params, _context) => {
-    const { error, objectDN } = params;
-    console.error(`Error handler invoked for object ${objectDN}: ${error.message}`);
+    const { error, baseDN, samAccountName } = params;
+    console.error(`Error handler invoked for user "${samAccountName}" in "${baseDN}": ${error.message}`);
 
     const errorMessage = error.message.toLowerCase();
 
@@ -227,6 +282,18 @@ var script = {
         errorMessage.includes('econnrefused')) {
       console.error('Connection error - may be transient, framework will retry');
       throw error;
+    }
+
+    // User not found (fatal - don't retry)
+    if (errorMessage.includes('user not found')) {
+      console.error('User not found - check samAccountName and baseDN');
+      throw new Error(`User not found: ${error.message}`);
+    }
+
+    // Multiple users found (fatal - don't retry)
+    if (errorMessage.includes('multiple users found')) {
+      console.error('Multiple users found - sAMAccountName should be unique');
+      throw new Error(`Multiple users found: ${error.message}`);
     }
 
     // Object not found (fatal - don't retry)
@@ -269,17 +336,19 @@ var script = {
    *
    * @param {Object} params - Original params plus halt reason
    * @param {string} params.reason - The reason for the halt
-   * @param {string} [params.objectDN] - The object DN being processed
+   * @param {string} [params.baseDN] - The base DN being searched
+   * @param {string} [params.samAccountName] - The sAMAccountName being looked up
    * @param {Object} _context - Execution context (unused)
    * @returns {Object} Cleanup results with halted status
    */
   halt: async (params, _context) => {
-    const { reason, objectDN } = params;
-    console.log(`Active Directory move object operation halted: ${reason}`);
+    const { reason, baseDN, samAccountName } = params;
+    console.log(`Active Directory move user operation halted: ${reason}`);
 
     return {
       status: 'halted',
-      objectDN: objectDN || 'unknown',
+      baseDN: baseDN || 'unknown',
+      samAccountName: samAccountName || 'unknown',
       reason,
       halted_at: new Date().toISOString()
     };
