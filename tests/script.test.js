@@ -3,12 +3,14 @@ import { jest, describe, test, expect, beforeEach } from '@jest/globals';
 const mockBind = jest.fn();
 const mockUnbind = jest.fn();
 const mockModifyDN = jest.fn();
+const mockSearch = jest.fn();
 
 jest.unstable_mockModule('ldapts', () => ({
   Client: jest.fn().mockImplementation(() => ({
     bind: mockBind,
     unbind: mockUnbind,
-    modifyDN: mockModifyDN
+    modifyDN: mockModifyDN,
+    search: mockSearch
   }))
 }));
 
@@ -21,7 +23,7 @@ jest.unstable_mockModule('@sgnl-actions/utils', () => ({
 const { default: script } = await import('../src/script.mjs');
 const { Client } = await import('ldapts');
 
-describe('AD Move Object Script', () => {
+describe('AD Move User Script', () => {
   const mockContext = {
     environment: {
       ADDRESS: 'ldaps://dc.example.com:636'
@@ -33,114 +35,122 @@ describe('AD Move Object Script', () => {
     outputs: {}
   };
 
+  const defaultParams = {
+    baseDN: 'DC=example,DC=com',
+    samAccountName: 'jdoe',
+    newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
+  };
+
+  const mockUserDN = 'CN=John Doe,OU=Users,DC=example,DC=com';
+
   beforeEach(() => {
     jest.clearAllMocks();
     mockBind.mockResolvedValue(undefined);
     mockUnbind.mockResolvedValue(undefined);
     mockModifyDN.mockResolvedValue(undefined);
     mockGetBaseURL.mockReturnValue('ldaps://dc.example.com:636');
+    // Mock search to return user DN
+    mockSearch.mockResolvedValue({
+      searchEntries: [{ dn: mockUserDN }]
+    });
   });
 
   describe('invoke handler', () => {
-    test('should move object to new OU', async () => {
-      const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
-      };
-
-      const result = await script.invoke(params, mockContext);
+    test('should move user to new OU', async () => {
+      const result = await script.invoke(defaultParams, mockContext);
 
       expect(result.status).toBe('success');
-      expect(result.previousDN).toBe('CN=John Doe,OU=Users,DC=example,DC=com');
+      expect(result.userDN).toBe(mockUserDN);
+      expect(result.previousDN).toBe(mockUserDN);
       expect(result.newDN).toBe('CN=John Doe,OU=DisabledUsers,DC=example,DC=com');
       expect(result.moved).toBe(true);
       expect(result.renamed).toBe(false);
-      // ldapts modifyDN takes 2 params: currentDN and full newDN
+
+      // Verify search was called to find user
+      expect(mockSearch).toHaveBeenCalledWith(defaultParams.baseDN, {
+        scope: 'sub',
+        filter: `(&(objectClass=user)(sAMAccountName=${defaultParams.samAccountName}))`,
+        attributes: ['distinguishedName']
+      });
+
+      // Verify modifyDN was called with resolved DN
       expect(mockModifyDN).toHaveBeenCalledWith(
-        'CN=John Doe,OU=Users,DC=example,DC=com',
+        mockUserDN,
         'CN=John Doe,OU=DisabledUsers,DC=example,DC=com'
       );
     });
 
-    test('should move and rename object simultaneously', async () => {
+    test('should move and rename user simultaneously', async () => {
       const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com',
+        ...defaultParams,
         newName: 'John Doe (Disabled)'
       };
 
       const result = await script.invoke(params, mockContext);
 
       expect(result.status).toBe('success');
-      expect(result.previousDN).toBe('CN=John Doe,OU=Users,DC=example,DC=com');
+      expect(result.previousDN).toBe(mockUserDN);
       expect(result.newDN).toBe('CN=John Doe (Disabled),OU=DisabledUsers,DC=example,DC=com');
       expect(result.moved).toBe(true);
       expect(result.renamed).toBe(true);
-      // ldapts modifyDN takes 2 params: currentDN and full newDN
+
       expect(mockModifyDN).toHaveBeenCalledWith(
-        'CN=John Doe,OU=Users,DC=example,DC=com',
+        mockUserDN,
         'CN=John Doe (Disabled),OU=DisabledUsers,DC=example,DC=com'
       );
     });
 
-    test('should move OU object preserving OU= prefix', async () => {
-      const params = {
-        objectDN: 'OU=SalesTeam,OU=Departments,DC=example,DC=com',
-        newParentDN: 'OU=ArchivedDepartments,DC=example,DC=com'
-      };
+    test('should throw when user not found', async () => {
+      mockSearch.mockResolvedValueOnce({ searchEntries: [] });
 
-      const result = await script.invoke(params, mockContext);
-
-      expect(result.status).toBe('success');
-      expect(result.newDN).toBe('OU=SalesTeam,OU=ArchivedDepartments,DC=example,DC=com');
-      // ldapts modifyDN takes 2 params: currentDN and full newDN
-      expect(mockModifyDN).toHaveBeenCalledWith(
-        'OU=SalesTeam,OU=Departments,DC=example,DC=com',
-        'OU=SalesTeam,OU=ArchivedDepartments,DC=example,DC=com'
+      await expect(script.invoke(defaultParams, mockContext)).rejects.toThrow(
+        'User not found with sAMAccountName: jdoe'
       );
+
+      expect(mockModifyDN).not.toHaveBeenCalled();
+      expect(mockUnbind).toHaveBeenCalled();
     });
 
-    test('should move OU object with rename', async () => {
-      const params = {
-        objectDN: 'OU=SalesTeam,OU=Departments,DC=example,DC=com',
-        newParentDN: 'OU=ArchivedDepartments,DC=example,DC=com',
-        newName: 'SalesTeam (Archived)'
-      };
+    test('should throw when multiple users found', async () => {
+      mockSearch.mockResolvedValueOnce({
+        searchEntries: [
+          { dn: 'CN=John Doe,OU=Users,DC=example,DC=com' },
+          { dn: 'CN=Jane Doe,OU=Users,DC=example,DC=com' }
+        ]
+      });
 
-      const result = await script.invoke(params, mockContext);
-
-      expect(result.status).toBe('success');
-      expect(result.newDN).toBe('OU=SalesTeam (Archived),OU=ArchivedDepartments,DC=example,DC=com');
-      expect(result.renamed).toBe(true);
-      // ldapts modifyDN takes 2 params: currentDN and full newDN
-      expect(mockModifyDN).toHaveBeenCalledWith(
-        'OU=SalesTeam,OU=Departments,DC=example,DC=com',
-        'OU=SalesTeam (Archived),OU=ArchivedDepartments,DC=example,DC=com'
+      await expect(script.invoke(defaultParams, mockContext)).rejects.toThrow(
+        'Multiple users found with sAMAccountName: jdoe. Expected exactly one.'
       );
+
+      expect(mockModifyDN).not.toHaveBeenCalled();
+      expect(mockUnbind).toHaveBeenCalled();
     });
 
     test('should handle dry run without making changes', async () => {
       const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com',
+        ...defaultParams,
         dry_run: true
       };
 
       const result = await script.invoke(params, mockContext);
 
       expect(result.status).toBe('dry_run_completed');
-      expect(result.previousDN).toBe('CN=John Doe,OU=Users,DC=example,DC=com');
-      expect(result.newDN).toBe('CN=John Doe,OU=DisabledUsers,DC=example,DC=com');
+      expect(result.baseDN).toBe(defaultParams.baseDN);
+      expect(result.samAccountName).toBe(defaultParams.samAccountName);
+      expect(result.userDN).toBeNull();
+      expect(result.previousDN).toBeNull();
+      expect(result.newDN).toBeNull();
       expect(result.moved).toBe(false);
       expect(result.renamed).toBe(false);
       expect(mockBind).not.toHaveBeenCalled();
+      expect(mockSearch).not.toHaveBeenCalled();
       expect(mockModifyDN).not.toHaveBeenCalled();
     });
 
     test('should handle dry run with rename', async () => {
       const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com',
+        ...defaultParams,
         newName: 'John Doe (Disabled)',
         dry_run: true
       };
@@ -148,25 +158,38 @@ describe('AD Move Object Script', () => {
       const result = await script.invoke(params, mockContext);
 
       expect(result.status).toBe('dry_run_completed');
-      expect(result.newDN).toBe('CN=John Doe (Disabled),OU=DisabledUsers,DC=example,DC=com');
       expect(result.renamed).toBe(true);
       expect(mockModifyDN).not.toHaveBeenCalled();
     });
 
-    test('should throw when objectDN is missing', async () => {
+    test('should throw when baseDN is missing', async () => {
       const params = {
+        samAccountName: 'jdoe',
         newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
       };
 
       await expect(script.invoke(params, mockContext)).rejects.toThrow(
-        'objectDN is required'
+        'baseDN is required'
+      );
+      expect(mockBind).not.toHaveBeenCalled();
+    });
+
+    test('should throw when samAccountName is missing', async () => {
+      const params = {
+        baseDN: 'DC=example,DC=com',
+        newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
+      };
+
+      await expect(script.invoke(params, mockContext)).rejects.toThrow(
+        'samAccountName is required'
       );
       expect(mockBind).not.toHaveBeenCalled();
     });
 
     test('should throw when newParentDN is missing', async () => {
       const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com'
+        baseDN: 'DC=example,DC=com',
+        samAccountName: 'jdoe'
       };
 
       await expect(script.invoke(params, mockContext)).rejects.toThrow(
@@ -181,12 +204,7 @@ describe('AD Move Object Script', () => {
         secrets: { ...mockContext.secrets, LDAP_BIND_DN: '' }
       };
 
-      const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
-      };
-
-      await expect(script.invoke(params, context)).rejects.toThrow('LDAP_BIND_DN secret is required');
+      await expect(script.invoke(defaultParams, context)).rejects.toThrow('LDAP_BIND_DN secret is required');
     });
 
     test('should throw on missing LDAP_BIND_PASSWORD', async () => {
@@ -195,25 +213,7 @@ describe('AD Move Object Script', () => {
         secrets: { ...mockContext.secrets, LDAP_BIND_PASSWORD: '' }
       };
 
-      const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
-      };
-
-      await expect(script.invoke(params, context)).rejects.toThrow('LDAP_BIND_PASSWORD secret is required');
-    });
-
-    test('should propagate LDAP error when object does not exist', async () => {
-      mockModifyDN.mockRejectedValue(
-        Object.assign(new Error('No such object'), { code: 32 })
-      );
-
-      const params = {
-        objectDN: 'CN=NonExistent,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
-      };
-
-      await expect(script.invoke(params, mockContext)).rejects.toThrow('No such object');
+      await expect(script.invoke(defaultParams, context)).rejects.toThrow('LDAP_BIND_PASSWORD secret is required');
     });
 
     test('should propagate LDAP error when target already has object', async () => {
@@ -221,12 +221,7 @@ describe('AD Move Object Script', () => {
         Object.assign(new Error('Entry already exists'), { code: 68 })
       );
 
-      const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
-      };
-
-      await expect(script.invoke(params, mockContext)).rejects.toThrow('Entry already exists');
+      await expect(script.invoke(defaultParams, mockContext)).rejects.toThrow('Entry already exists');
     });
 
     test('should set rejectUnauthorized false when TLS_SKIP_VERIFY is true', async () => {
@@ -235,12 +230,7 @@ describe('AD Move Object Script', () => {
         environment: { ...mockContext.environment, TLS_SKIP_VERIFY: 'true' }
       };
 
-      const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
-      };
-
-      await script.invoke(params, context);
+      await script.invoke(defaultParams, context);
 
       expect(Client).toHaveBeenCalledWith({
         url: 'ldaps://dc.example.com:636',
@@ -251,12 +241,7 @@ describe('AD Move Object Script', () => {
     });
 
     test('should set rejectUnauthorized to true for ldaps:// URLs when TLS_SKIP_VERIFY is not set', async () => {
-      const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
-      };
-
-      await script.invoke(params, mockContext);
+      await script.invoke(defaultParams, mockContext);
 
       expect(Client).toHaveBeenCalledWith({
         url: 'ldaps://dc.example.com:636',
@@ -269,12 +254,7 @@ describe('AD Move Object Script', () => {
     test('should not include tlsOptions for ldap:// URLs when TLS_SKIP_VERIFY is not set', async () => {
       mockGetBaseURL.mockReturnValue('ldap://dc.example.com:389');
 
-      const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
-      };
-
-      await script.invoke(params, mockContext);
+      await script.invoke(defaultParams, mockContext);
 
       expect(Client).toHaveBeenCalledWith({
         url: 'ldap://dc.example.com:389',
@@ -286,13 +266,7 @@ describe('AD Move Object Script', () => {
     test('should handle unbind errors gracefully', async () => {
       mockUnbind.mockRejectedValue(new Error('Unbind failed'));
 
-      const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
-      };
-
-      // Should still succeed even if unbind fails
-      const result = await script.invoke(params, mockContext);
+      const result = await script.invoke(defaultParams, mockContext);
 
       expect(result.status).toBe('success');
       expect(mockUnbind).toHaveBeenCalled();
@@ -302,13 +276,26 @@ describe('AD Move Object Script', () => {
       mockModifyDN.mockRejectedValue(new Error('ModifyDN operation failed'));
       mockUnbind.mockRejectedValue(new Error('Unbind failed'));
 
-      const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
-        newParentDN: 'OU=DisabledUsers,DC=example,DC=com'
+      await expect(script.invoke(defaultParams, mockContext)).rejects.toThrow('ModifyDN operation failed');
+    });
+
+    test('should escape special characters in samAccountName for LDAP filter', async () => {
+      const paramsWithSpecialChars = {
+        ...defaultParams,
+        samAccountName: 'john*doe'
       };
 
-      // Should throw the original error, not the unbind error
-      await expect(script.invoke(params, mockContext)).rejects.toThrow('ModifyDN operation failed');
+      mockSearch.mockResolvedValueOnce({
+        searchEntries: [{ dn: mockUserDN }]
+      });
+
+      await script.invoke(paramsWithSpecialChars, mockContext);
+
+      expect(mockSearch).toHaveBeenCalledWith(defaultParams.baseDN, {
+        scope: 'sub',
+        filter: '(&(objectClass=user)(sAMAccountName=john\\2adoe))',
+        attributes: ['distinguishedName']
+      });
     });
   });
 
@@ -316,7 +303,7 @@ describe('AD Move Object Script', () => {
     test('should wrap authentication errors', async () => {
       const error = new Error('Invalid credentials');
       const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
+        ...defaultParams,
         error
       };
 
@@ -326,17 +313,37 @@ describe('AD Move Object Script', () => {
     test('should wrap permission errors', async () => {
       const error = new Error('Insufficient access rights');
       const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
+        ...defaultParams,
         error
       };
 
       await expect(script.error(params, mockContext)).rejects.toThrow('Insufficient LDAP permissions');
     });
 
+    test('should wrap user not found errors', async () => {
+      const error = new Error('User not found with sAMAccountName: jdoe');
+      const params = {
+        ...defaultParams,
+        error
+      };
+
+      await expect(script.error(params, mockContext)).rejects.toThrow('User not found');
+    });
+
+    test('should wrap multiple users found errors', async () => {
+      const error = new Error('Multiple users found with sAMAccountName: jdoe');
+      const params = {
+        ...defaultParams,
+        error
+      };
+
+      await expect(script.error(params, mockContext)).rejects.toThrow('Multiple users found');
+    });
+
     test('should wrap object not found errors', async () => {
       const error = new Error('No such object');
       const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
+        ...defaultParams,
         error
       };
 
@@ -346,7 +353,7 @@ describe('AD Move Object Script', () => {
     test('should wrap already exists errors', async () => {
       const error = new Error('Entry already exists');
       const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
+        ...defaultParams,
         error
       };
 
@@ -356,7 +363,7 @@ describe('AD Move Object Script', () => {
     test('should wrap invalid DN errors', async () => {
       const error = new Error('Invalid DN syntax');
       const params = {
-        objectDN: 'invalid-dn',
+        ...defaultParams,
         error
       };
 
@@ -366,7 +373,7 @@ describe('AD Move Object Script', () => {
     test('should re-throw connection errors for retry', async () => {
       const error = new Error('Connection timeout');
       const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
+        ...defaultParams,
         error
       };
 
@@ -375,21 +382,22 @@ describe('AD Move Object Script', () => {
   });
 
   describe('halt handler', () => {
-    test('should return halted status with objectDN', async () => {
+    test('should return halted status with parameters', async () => {
       const params = {
-        objectDN: 'CN=John Doe,OU=Users,DC=example,DC=com',
+        ...defaultParams,
         reason: 'timeout'
       };
 
       const result = await script.halt(params, mockContext);
 
       expect(result.status).toBe('halted');
-      expect(result.objectDN).toBe('CN=John Doe,OU=Users,DC=example,DC=com');
+      expect(result.baseDN).toBe(defaultParams.baseDN);
+      expect(result.samAccountName).toBe(defaultParams.samAccountName);
       expect(result.reason).toBe('timeout');
       expect(result.halted_at).toBeDefined();
     });
 
-    test('should handle halt without objectDN', async () => {
+    test('should handle halt without baseDN and samAccountName', async () => {
       const params = {
         reason: 'system_shutdown'
       };
@@ -397,7 +405,8 @@ describe('AD Move Object Script', () => {
       const result = await script.halt(params, mockContext);
 
       expect(result.status).toBe('halted');
-      expect(result.objectDN).toBe('unknown');
+      expect(result.baseDN).toBe('unknown');
+      expect(result.samAccountName).toBe('unknown');
       expect(result.reason).toBe('system_shutdown');
     });
   });

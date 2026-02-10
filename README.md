@@ -1,11 +1,11 @@
-# AD Move Object
+# AD Move User
 
-Move any Active Directory object (users, groups, OUs, computers, etc.) to a new parent container/OU via LDAP.
+Move a user to a new parent container/OU in Active Directory via LDAP.
 
 ## Overview
 
-This action moves AD objects using the LDAP `modifyDN` operation with support for:
-- Moving any object type (users, groups, OUs, computers, etc.)
+This action moves AD users using the LDAP `modifyDN` operation with support for:
+- User lookup by sAMAccountName
 - Optional renaming during move
 - Dry run mode for validation
 
@@ -13,9 +13,10 @@ This action moves AD objects using the LDAP `modifyDN` operation with support fo
 
 | Name | Type | Required | Description | Example |
 |------|------|----------|-------------|---------|
-| `objectDN` | text | Yes | Current Distinguished Name of the object to move | `CN=John Doe,OU=Users,DC=corp,DC=example,DC=com` |
-| `newParentDN` | text | Yes | Target container/OU DN to move the object into | `OU=DisabledUsers,DC=corp,DC=example,DC=com` |
-| `newName` | text | No | New name for the object (without prefix). If omitted, keeps current name | `John Doe (Disabled)` |
+| `baseDN` | text | Yes | Base DN to search for the user | `DC=corp,DC=example,DC=com` |
+| `samAccountName` | text | Yes | The user's sAMAccountName (pre-Windows 2000 logon name) | `jdoe` |
+| `newParentDN` | text | Yes | Target container/OU DN to move the user into | `OU=DisabledUsers,DC=corp,DC=example,DC=com` |
+| `newName` | text | No | New name for the user (without prefix). If omitted, keeps current name | `John Doe (Disabled)` |
 | `dry_run` | boolean | No | Validate without making changes | `true` |
 | `address` | text | No | Optional LDAP server URL override | `ldaps://ad.corp.example.com:636` |
 
@@ -24,10 +25,11 @@ This action moves AD objects using the LDAP `modifyDN` operation with support fo
 | Name | Type | Description |
 |------|------|-------------|
 | `status` | text | Operation result (`success`, `halted`, `dry_run_completed`) |
+| `userDN` | text | The resolved Distinguished Name of the user |
 | `previousDN` | text | Original DN before move |
 | `newDN` | text | New DN after move |
-| `moved` | boolean | Whether the object was moved |
-| `renamed` | boolean | Whether the object was renamed during the move |
+| `moved` | boolean | Whether the user was moved |
+| `renamed` | boolean | Whether the user was renamed during the move |
 | `address` | text | LDAP server address used |
 
 ## Environment Variables
@@ -48,54 +50,37 @@ This action moves AD objects using the LDAP `modifyDN` operation with support fo
 
 ### Move a user to a different OU
 
-```javascript
+```json
 {
-  objectDN: "CN=John Doe,OU=Users,DC=example,DC=com",
-  newParentDN: "OU=DisabledUsers,DC=example,DC=com"
+  "baseDN": "DC=corp,DC=example,DC=com",
+  "samAccountName": "jdoe",
+  "newParentDN": "OU=DisabledUsers,DC=corp,DC=example,DC=com"
 }
 ```
 
-Result: User moved to `CN=John Doe,OU=DisabledUsers,DC=example,DC=com`
+The action will lookup the user by sAMAccountName, find their DN (e.g., `CN=John Doe,OU=Users,DC=corp,DC=example,DC=com`), and move them to the new location.
 
 ### Move and rename a user
 
-```javascript
+```json
 {
-  objectDN: "CN=John Doe,OU=Users,DC=example,DC=com",
-  newParentDN: "OU=DisabledUsers,DC=example,DC=com",
-  newName: "John Doe (Disabled)"
+  "baseDN": "DC=corp,DC=example,DC=com",
+  "samAccountName": "jdoe",
+  "newParentDN": "OU=DisabledUsers,DC=corp,DC=example,DC=com",
+  "newName": "John Doe (Disabled)"
 }
 ```
 
-Result: User moved to `CN=John Doe (Disabled),OU=DisabledUsers,DC=example,DC=com`
-
-### Move an OU
-
-```javascript
-{
-  objectDN: "OU=SalesTeam,OU=Departments,DC=example,DC=com",
-  newParentDN: "OU=ArchivedDepartments,DC=example,DC=com"
-}
-```
-
-Result: OU moved to `OU=SalesTeam,OU=ArchivedDepartments,DC=example,DC=com`
-
-### Move a computer object
-
-```javascript
-{
-  objectDN: "CN=WORKSTATION01,OU=Workstations,DC=example,DC=com",
-  newParentDN: "OU=DecommissionedComputers,DC=example,DC=com"
-}
-```
+Result: User moved to `CN=John Doe (Disabled),OU=DisabledUsers,DC=corp,DC=example,DC=com`
 
 ### Dry run to validate the move
 
-```javascript
+```json
 {
-  objectDN: "CN=John Doe,OU=Users,DC=example,DC=com",
-  newParentDN: "OU=DisabledUsers,DC=example,DC=com",
-  dry_run: true
+  "baseDN": "DC=corp,DC=example,DC=com",
+  "samAccountName": "jdoe",
+  "newParentDN": "OU=DisabledUsers,DC=corp,DC=example,DC=com",
+  "dry_run": true
 }
 ```
 
@@ -103,8 +88,8 @@ Result: OU moved to `OU=SalesTeam,OU=ArchivedDepartments,DC=example,DC=com`
 
 ### Success Scenarios
 
-- **Object moved**: Returns `status: "success"`, `moved: true`
-- **Object moved and renamed**: Returns `status: "success"`, `moved: true`, `renamed: true`
+- **User moved**: Returns `status: "success"`, `moved: true`
+- **User moved and renamed**: Returns `status: "success"`, `moved: true`, `renamed: true`
 
 ### Retryable Errors
 
@@ -116,13 +101,23 @@ Result: OU moved to `OU=SalesTeam,OU=ArchivedDepartments,DC=example,DC=com`
 
 ### Fatal Errors
 
-| LDAP Code | Error | Description |
-|-----------|-------|-------------|
-| 32 | No Such Object | The object DN does not exist |
-| 68 | Entry Already Exists | An object with the same name already exists at the target location |
-| 49 | Invalid Credentials | Bind DN or password is incorrect |
-| 50 | Insufficient Access Rights | Service account lacks permission to move objects |
-| 34 | Invalid DN Syntax | Malformed Distinguished Name |
+| Error | Description |
+|-------|-------------|
+| User not found with sAMAccountName | No user exists with the specified sAMAccountName |
+| Multiple users found | More than one user matches the sAMAccountName (should not happen in a properly configured AD) |
+| Invalid Credentials | Bind DN or password is incorrect |
+| Insufficient Access Rights | Service account lacks permission to move objects |
+| Entry Already Exists | An object with the same name already exists at the target location |
+| Invalid DN Syntax | Malformed Distinguished Name |
+
+## Security Considerations
+
+- **Authentication**: Uses LDAP Simple Bind with a dedicated service account
+- **Transport Security**: Supports LDAPS (LDAP over TLS) for encrypted connections
+- **TLS Verification**: Certificate verification is enabled by default; `TLS_SKIP_VERIFY` should only be used in development or with self-signed certificates
+- **Credential Security**: Bind credentials are provided via secrets and are never logged
+- **Connection Lifecycle**: Connections are unbound in a `finally` block to prevent resource leaks
+- **LDAP Filter Escaping**: Special characters in sAMAccountName are escaped to prevent LDAP injection
 
 ## Development
 
@@ -184,49 +179,51 @@ npm run dev
 
 ### Common Issues
 
-1. **"Missing LDAP bind credentials"**
+1. **"User not found with sAMAccountName"**
+   - Verify the sAMAccountName is correct (case-insensitive in AD)
+   - Check that the user exists within the specified baseDN
+
+2. **"Multiple users found"**
+   - This should not happen in a properly configured AD since sAMAccountName must be unique within a domain
+
+3. **"Missing LDAP bind credentials"**
    - Ensure `LDAP_BIND_DN` and `LDAP_BIND_PASSWORD` are set in secrets
    - Verify the bind DN is a valid Distinguished Name
 
-2. **"No URL specified"**
+4. **"No URL specified"**
    - Ensure the `ADDRESS` environment variable is set or `address` is provided in params
    - Verify the URL format (e.g., `ldaps://ad.corp.example.com:636`)
 
-3. **"Invalid credentials"**
+5. **"Invalid credentials"**
    - Verify the service account DN and password are correct
    - Check that the account is not locked or expired in Active Directory
 
-4. **"Insufficient access rights"**
+6. **"Insufficient access rights"**
    - Verify the service account has permission to move objects between containers
    - The account needs Delete permission on the source and Create permission on the target
 
-5. **"No such object"**
-   - Verify the object DN exists in Active Directory
-   - Verify the target parent DN exists
-   - Check for typos in the Distinguished Names
-
-6. **"Entry already exists"**
+7. **"Entry already exists"**
    - An object with the same name already exists at the target location
    - Use a different `newName` or move the existing object first
 
-7. **TLS/SSL connection errors**
+8. **TLS/SSL connection errors**
    - Verify the LDAP server is accessible on the configured port
    - For LDAPS, ensure the server certificate is trusted or set `TLS_SKIP_VERIFY=true` for testing
    - Check that the correct port is used (389 for LDAP, 636 for LDAPS)
 
-### Verifying Object Location
+### Verifying User Location
 
-To verify the action worked correctly, you can check the object location using:
+To verify the action worked correctly, you can check the user location using:
 
 ```bash
 # Using ldapsearch
 ldapsearch -H ldaps://ad.corp.example.com:636 \
   -D "CN=svc-sgnl,OU=Service Accounts,DC=corp,DC=example,DC=com" \
   -W -b "DC=corp,DC=example,DC=com" \
-  "(cn=John Doe)" dn
+  "(sAMAccountName=jdoe)" dn
 
 # Using PowerShell
-Get-ADUser -Identity "John Doe" | Select-Object DistinguishedName
+Get-ADUser -Identity "jdoe" | Select-Object DistinguishedName
 ```
 
 ## Support
@@ -234,7 +231,3 @@ Get-ADUser -Identity "John Doe" | Select-Object DistinguishedName
 - [ldapts Documentation](https://github.com/ldapts/ldapts)
 - [Active Directory LDAP Reference](https://docs.microsoft.com/en-us/windows/win32/ad/active-directory-domain-services)
 - [SGNL Actions Documentation](https://github.com/sgnl-actions)
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
