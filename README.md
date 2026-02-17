@@ -1,4 +1,4 @@
-# AD Move User
+# Active Directory Move User Action
 
 Move a user to a new parent container/OU in Active Directory via LDAP/LDAPS.
 
@@ -9,10 +9,31 @@ This action moves AD users using the LDAP `modifyDN` operation with support for:
 - Optional renaming during move
 - Dry run mode for validation
 
-## Inputs
+## Prerequisites
 
-| Name | Type | Required | Description | Example |
-|------|------|----------|-------------|---------|
+- Network access to an Active Directory Domain Controller (LDAP port 389 or LDAPS port 636)
+- A service account with permission to **move user objects** between containers/OUs
+
+## Configuration
+
+### Authentication
+
+| Secret | Description |
+|--------|-------------|
+| `LDAP_BIND_DN` | Bind DN of the service account (e.g., `CN=svc-sgnl,OU=Service Accounts,DC=example,DC=com`) |
+| `LDAP_BIND_PASSWORD` | Password for the service account |
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ADDRESS` | LDAP/LDAPS URL of the Domain Controller (e.g., `ldaps://dc.example.com:636`) | Required |
+| `TLS_SKIP_VERIFY` | Set to `true` to skip TLS certificate verification | `false` |
+
+### Input Parameters
+
+| Parameter | Type | Required | Description | Example |
+|-----------|------|----------|-------------|---------|
 | `baseDN` | text | Yes | Base DN to search for the user | `DC=corp,DC=example,DC=com` |
 | `samAccountName` | text | Yes | The user's sAMAccountName (pre-Windows 2000 logon name) | `jdoe` |
 | `newParentDN` | text | Yes | Target container/OU DN to move the user into | `OU=DisabledUsers,DC=corp,DC=example,DC=com` |
@@ -20,10 +41,10 @@ This action moves AD users using the LDAP `modifyDN` operation with support for:
 | `dry_run` | boolean | No | Validate without making changes | `true` |
 | `address` | text | No | Optional LDAP server URL override | `ldaps://ad.corp.example.com:636` |
 
-## Outputs
+### Output
 
-| Name | Type | Description |
-|------|------|-------------|
+| Field | Type | Description |
+|-------|------|-------------|
 | `status` | text | Operation result (`success`, `halted`, `dry_run_completed`) |
 | `userDN` | text | The resolved Distinguished Name of the user |
 | `previousDN` | text | Original DN before move |
@@ -32,23 +53,9 @@ This action moves AD users using the LDAP `modifyDN` operation with support for:
 | `renamed` | boolean | Whether the user was renamed during the move |
 | `address` | text | LDAP server address used |
 
-## Environment Variables
+## Usage Examples
 
-| Name | Required | Description |
-|------|----------|-------------|
-| `ADDRESS` | Yes | LDAP server URL (e.g., `ldap://dc.example.com:389`) |
-| `TLS_SKIP_VERIFY` | No | Skip TLS certificate verification (`true`/`false`) |
-
-## Secrets
-
-| Name | Required | Description |
-|------|----------|-------------|
-| `LDAP_BIND_DN` | Yes | DN of the account to bind with |
-| `LDAP_BIND_PASSWORD` | Yes | Password for the bind account |
-
-## Examples
-
-### Move a user to a different OU
+### Move a User to a Different OU
 
 ```json
 {
@@ -60,7 +67,7 @@ This action moves AD users using the LDAP `modifyDN` operation with support for:
 
 The action will lookup the user by sAMAccountName, find their DN (e.g., `CN=John Doe,OU=Users,DC=corp,DC=example,DC=com`), and move them to the new location.
 
-### Move and rename a user
+### Move and Rename a User
 
 ```json
 {
@@ -73,7 +80,7 @@ The action will lookup the user by sAMAccountName, find their DN (e.g., `CN=John
 
 Result: User moved to `CN=John Doe (Disabled),OU=DisabledUsers,DC=corp,DC=example,DC=com`
 
-### Dry run to validate the move
+### Dry Run to Validate the Move
 
 ```json
 {
@@ -84,12 +91,25 @@ Result: User moved to `CN=John Doe (Disabled),OU=DisabledUsers,DC=corp,DC=exampl
 }
 ```
 
+### Skip TLS Verification
+
+For development or self-signed certificate environments:
+
+```json
+{
+  "environment": {
+    "ADDRESS": "ldaps://dc.dev.example.com:636",
+    "TLS_SKIP_VERIFY": "true"
+  }
+}
+```
+
 ## Error Handling
 
 ### Success Scenarios
 
-- **User moved**: Returns `status: "success"`, `moved: true`
-- **User moved and renamed**: Returns `status: "success"`, `moved: true`, `renamed: true`
+- **User moved** — returns `status: "success"`, `moved: true`
+- **User moved and renamed** — returns `status: "success"`, `moved: true`, `renamed: true`
 
 ### Retryable Errors
 
@@ -112,12 +132,12 @@ Result: User moved to `CN=John Doe (Disabled),OU=DisabledUsers,DC=corp,DC=exampl
 
 ## Security Considerations
 
-- **Authentication**: Uses LDAP Simple Bind with a dedicated service account
-- **Transport Security**: Supports LDAPS (LDAP over TLS) for encrypted connections
-- **TLS Verification**: Certificate verification is enabled by default; `TLS_SKIP_VERIFY` should only be used in development or with self-signed certificates
-- **Credential Security**: Bind credentials are provided via secrets and are never logged
-- **Connection Lifecycle**: Connections are unbound in a `finally` block to prevent resource leaks
-- **LDAP Filter Escaping**: Special characters in sAMAccountName are escaped to prevent LDAP injection
+- Use LDAPS (port 636) in production to encrypt credentials and data in transit
+- Only skip TLS verification (`TLS_SKIP_VERIFY=true`) in development environments
+- The service account should have minimal permissions — only the ability to move objects between the relevant containers/OUs
+- Bind credentials are provided via secrets and are never logged
+- Connections are unbound in a `finally` block to prevent resource leaks
+- Special characters in sAMAccountName are escaped to prevent LDAP injection
 
 ## Development
 
@@ -177,39 +197,33 @@ npm run dev
 
 ## Troubleshooting
 
-### Common Issues
+### Connection Issues
 
-1. **"User not found with sAMAccountName"**
-   - Verify the sAMAccountName is correct (case-insensitive in AD)
-   - Check that the user exists within the specified baseDN
+- Verify the Domain Controller is reachable: `telnet dc.example.com 636`
+- Check that the `ADDRESS` environment variable includes the protocol and port: `ldaps://dc.example.com:636`
+- For LDAPS, ensure the DC's certificate is trusted or set `TLS_SKIP_VERIFY=true` for testing
 
-2. **"Multiple users found"**
-   - This should not happen in a properly configured AD since sAMAccountName must be unique within a domain
+### Authentication Failures
 
-3. **"Missing LDAP bind credentials"**
-   - Ensure `LDAP_BIND_DN` and `LDAP_BIND_PASSWORD` are set in secrets
-   - Verify the bind DN is a valid Distinguished Name
+- Verify the bind DN format matches your AD structure
+- Ensure the service account password has not expired
+- Check that the service account is not locked out
 
-4. **"No URL specified"**
-   - Ensure the `ADDRESS` environment variable is set or `address` is provided in params
-   - Verify the URL format (e.g., `ldaps://ad.corp.example.com:636`)
+### Permission Errors
 
-5. **"Invalid credentials"**
-   - Verify the service account DN and password are correct
-   - Check that the account is not locked or expired in Active Directory
+- The service account needs permission to move objects between containers
+- The account needs Delete permission on the source and Create permission on the target OU
+- Use AD delegation to grant the appropriate permissions
 
-6. **"Insufficient access rights"**
-   - Verify the service account has permission to move objects between containers
-   - The account needs Delete permission on the source and Create permission on the target
+### User Not Found
 
-7. **"Entry already exists"**
-   - An object with the same name already exists at the target location
-   - Use a different `newName` or move the existing object first
+- Verify the sAMAccountName is correct (case-insensitive in AD)
+- Check that the user exists within the specified `baseDN`
 
-8. **TLS/SSL connection errors**
-   - Verify the LDAP server is accessible on the configured port
-   - For LDAPS, ensure the server certificate is trusted or set `TLS_SKIP_VERIFY=true` for testing
-   - Check that the correct port is used (389 for LDAP, 636 for LDAPS)
+### Entry Already Exists
+
+- An object with the same name already exists at the target location
+- Use a different `newName` or move the existing object first
 
 ### Verifying User Location
 
