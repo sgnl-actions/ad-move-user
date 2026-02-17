@@ -297,6 +297,132 @@ describe('AD Move User Script', () => {
         attributes: ['distinguishedName']
       });
     });
+
+    test('should escape DN special characters in newName (comma)', async () => {
+      const params = {
+        ...defaultParams,
+        newName: 'Doe, John'
+      };
+
+      const result = await script.invoke(params, mockContext);
+
+      expect(result.status).toBe('success');
+      expect(result.renamed).toBe(true);
+      expect(mockModifyDN).toHaveBeenCalledWith(
+        mockUserDN,
+        'CN=Doe\\, John,OU=DisabledUsers,DC=example,DC=com'
+      );
+    });
+
+    test('should escape DN special characters in newName (plus sign)', async () => {
+      const params = {
+        ...defaultParams,
+        newName: 'John + Jane Doe'
+      };
+
+      const result = await script.invoke(params, mockContext);
+
+      expect(result.status).toBe('success');
+      expect(mockModifyDN).toHaveBeenCalledWith(
+        mockUserDN,
+        'CN=John \\+ Jane Doe,OU=DisabledUsers,DC=example,DC=com'
+      );
+    });
+
+    test('should handle apostrophe in newName (no escaping needed)', async () => {
+      const params = {
+        ...defaultParams,
+        newName: "O'Shea"
+      };
+
+      const result = await script.invoke(params, mockContext);
+
+      expect(result.status).toBe('success');
+      expect(mockModifyDN).toHaveBeenCalledWith(
+        mockUserDN,
+        "CN=O'Shea,OU=DisabledUsers,DC=example,DC=com"
+      );
+    });
+
+    test('should handle dashes in newName (no escaping needed)', async () => {
+      const params = {
+        ...defaultParams,
+        newName: 'John Doe - Disabled'
+      };
+
+      const result = await script.invoke(params, mockContext);
+
+      expect(result.status).toBe('success');
+      expect(mockModifyDN).toHaveBeenCalledWith(
+        mockUserDN,
+        'CN=John Doe - Disabled,OU=DisabledUsers,DC=example,DC=com'
+      );
+    });
+
+    test('should handle forward slash in newName (no escaping needed)', async () => {
+      const params = {
+        ...defaultParams,
+        newName: 'Sales/Marketing Lead'
+      };
+
+      const result = await script.invoke(params, mockContext);
+
+      expect(result.status).toBe('success');
+      expect(mockModifyDN).toHaveBeenCalledWith(
+        mockUserDN,
+        'CN=Sales/Marketing Lead,OU=DisabledUsers,DC=example,DC=com'
+      );
+    });
+
+    test('should escape backslash in newName', async () => {
+      const params = {
+        ...defaultParams,
+        newName: 'Test\\User'
+      };
+
+      const result = await script.invoke(params, mockContext);
+
+      expect(result.status).toBe('success');
+      expect(mockModifyDN).toHaveBeenCalledWith(
+        mockUserDN,
+        'CN=Test\\\\User,OU=DisabledUsers,DC=example,DC=com'
+      );
+    });
+
+    test('should handle escaped comma in current user DN during move', async () => {
+      const userDNWithComma = 'CN=Doe\\, John,OU=Users,DC=example,DC=com';
+      mockSearch.mockResolvedValueOnce({
+        searchEntries: [{ dn: userDNWithComma }]
+      });
+
+      const result = await script.invoke(defaultParams, mockContext);
+
+      expect(result.status).toBe('success');
+      expect(result.previousDN).toBe(userDNWithComma);
+      expect(mockModifyDN).toHaveBeenCalledWith(
+        userDNWithComma,
+        'CN=Doe\\, John,OU=DisabledUsers,DC=example,DC=com'
+      );
+    });
+
+    test('should escape backslash in samAccountName for LDAP filter', async () => {
+      const paramsWithBackslash = {
+        ...defaultParams,
+        samAccountName: 'domain\\user'
+      };
+
+      mockSearch.mockResolvedValueOnce({
+        searchEntries: [{ dn: mockUserDN }]
+      });
+
+      await script.invoke(paramsWithBackslash, mockContext);
+
+      expect(mockSearch).toHaveBeenCalledWith(defaultParams.baseDN, {
+        scope: 'sub',
+        filter: '(&(objectClass=user)(sAMAccountName=domain\\5cuser))',
+        attributes: ['distinguishedName']
+      });
+    });
   });
 
   describe('error handler', () => {

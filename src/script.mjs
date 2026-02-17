@@ -15,7 +15,7 @@ import { getBaseURL } from '@sgnl-actions/utils';
  * @returns {string} The escaped string safe for use in LDAP filters
  */
 function escapeLDAPFilter(str) {
-  return str.replace(/[\\*()]/g, (char) => '\\' + char.charCodeAt(0).toString(16).padStart(2, '0'));
+  return str.replace(/[\\*()\0]/g, (char) => '\\' + char.charCodeAt(0).toString(16).padStart(2, '0'));
 }
 
 /**
@@ -53,12 +53,13 @@ async function findUserDN(client, baseDN, samAccountName) {
 /**
  * Extract the RDN (Relative Distinguished Name) from a full DN.
  * The RDN is the first component of the DN (e.g., "CN=John Doe" from "CN=John Doe,OU=Users,DC=example,DC=com").
+ * Handles escaped characters in DN values (e.g., "CN=O\'Brien\, Pat" or "CN=Test\\Slash").
  *
  * @param {string} dn - The Distinguished Name
  * @returns {string|null} The RDN or null if invalid
  */
 function extractRDN(dn) {
-  const match = dn.match(/^([^,]+)/);
+  const match = dn.match(/^((?:[^\\,]|\\.)+)/);
   return match ? match[1] : null;
 }
 
@@ -72,6 +73,24 @@ function extractRDN(dn) {
 function extractRDNPrefix(dn) {
   const match = dn.match(/^([A-Za-z]+=)/);
   return match ? match[1] : 'CN=';
+}
+
+/**
+ * Escape special characters in a DN attribute value per RFC 4514.
+ * Characters that must be escaped: , + " \ < > ; and # at start, space at start/end.
+ *
+ * @param {string} value - The raw attribute value
+ * @returns {string} The escaped value safe for use in a DN
+ */
+function escapeDNValue(value) {
+  let escaped = value.replace(/([,+"\\<>;])/g, '\\$1');
+  if (escaped.startsWith('#') || escaped.startsWith(' ')) {
+    escaped = '\\' + escaped;
+  }
+  if (escaped.endsWith(' ')) {
+    escaped = escaped.slice(0, -1) + '\\ ';
+  }
+  return escaped;
 }
 
 /**
@@ -192,7 +211,7 @@ export default {
       const renamed = !!newName;
       if (newName) {
         const prefix = extractRDNPrefix(userDN);
-        newRDN = `${prefix}${newName}`;
+        newRDN = `${prefix}${escapeDNValue(newName)}`;
         console.log(`User will be renamed from "${currentRDN}" to "${newRDN}"`);
       }
 
