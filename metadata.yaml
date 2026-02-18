@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/sgnl-actions/schemas/main/metadata.schema.json
 name: ad-move-user
 description: Move a user to a new parent container/OU in Active Directory via LDAP
 
