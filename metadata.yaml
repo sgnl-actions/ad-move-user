@@ -67,10 +67,18 @@ outputs:
     type: boolean
     description: Whether the user was renamed during the move
 
+  baseDN:
+    type: text
+    description: The base DN used to search for the user
+
+  samAccountName:
+    type: text
+    description: The sAMAccountName used to identify the user
+
+  newParentDN:
+    type: text
+    description: The target parent container/OU DN the user was moved into
+
   address:
     type: text
     description: LDAP server address used
-
-  message:
-    type: text
-    description: Additional status message or error details
