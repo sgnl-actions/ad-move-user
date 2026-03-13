@@ -4,14 +4,14 @@
  * Development runner for testing scripts locally
  *
  * Configuration is read from environment variables. Set them in:
- * - Parent directory's .env file (loaded via --env-file flag)
+ * - .env file in the repo root (loaded via --env-file flag)
  * - Shell environment variables
  * - Or override inline below
  */
 
 import script from '../src/script.mjs';
 
-// Read configuration from environment variables (set in ../.env)
+// Read configuration from environment variables (set in .env)
 const mockContext = {
   environment: {
     ADDRESS: process.env.AD_ADDRESS || 'ldap://localhost:389',
@@ -27,14 +27,17 @@ const mockContext = {
 };
 
 // Action-specific parameters - customize these for your test
-// Example: Move user to DisabledUsers OU and optionally rename
 const mockParams = {
-  baseDN: 'DC=corp,DC=example,DC=com',
-  samAccountName: 'jsmith',
-  newParentDN: 'OU=DisabledUsers,DC=corp,DC=example,DC=com',
-  // newName: 'John Smith (Disabled)',  // Optional: rename during move
+  baseDN: process.env.BASE_DN || 'DC=corp,DC=example,DC=com',
+  samAccountName: process.env.SAM_ACCOUNT_NAME || 'jdoe',
+  newParentDN: process.env.NEW_PARENT_DN || 'OU=DisabledUsers,DC=corp,DC=example,DC=com',
   dry_run: process.env.DRY_RUN === 'true'
 };
+
+// Optional: rename during move
+if (process.env.NEW_NAME) {
+  mockParams.newName = process.env.NEW_NAME;
+}
 
 async function runDev() {
   console.log('Running job script in development mode...\n');
@@ -42,19 +45,14 @@ async function runDev() {
   // Validate required environment variables
   if (!mockContext.secrets.LDAP_BIND_DN || !mockContext.secrets.LDAP_BIND_PASSWORD) {
     console.error('ERROR: Missing required environment variables.');
-    console.error('Set LDAP_BIND_DN and LDAP_BIND_PASSWORD in ../.env or environment.');
+    console.error('Set LDAP_BIND_DN and LDAP_BIND_PASSWORD in .env or environment.');
     console.error('\nExample:');
     console.error('  export LDAP_BIND_DN="CN=admin,DC=example,DC=com"');
     console.error('  export LDAP_BIND_PASSWORD="password"');
     process.exit(1);
   }
 
-  console.log('Parameters:', JSON.stringify(mockParams, null, 2));
-  console.log('Context:', JSON.stringify({
-    ...mockContext,
-    secrets: { LDAP_BIND_DN: mockContext.secrets.LDAP_BIND_DN, LDAP_BIND_PASSWORD: '***' }
-  }, null, 2));
-  console.log('\n' + '='.repeat(50) + '\n');
+  console.log('='.repeat(50) + '\n');
 
   try {
     const result = await script.invoke(mockParams, mockContext);

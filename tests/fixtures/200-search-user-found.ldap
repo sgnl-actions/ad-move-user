@@ -1,0 +1,8 @@
+# LDAP search operation - user found by sAMAccountName
+operation: search
+result: success
+code: 0
+searchEntries:
+  - dn: "CN=John Doe,OU=Users,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+    attributes:
+      distinguishedName: "CN=John Doe,OU=Users,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
