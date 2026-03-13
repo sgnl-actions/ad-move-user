@@ -1,0 +1,9 @@
+# LDAP modifyDN operation - entry already exists at target
+operation: modifyDN
+result: error
+code: 68
+message: "ENTRY_ALREADY_EXISTS: An entry with the same name already exists at the target location"
+error:
+  name: "LDAPError"
+  code: 68
+  message: "ENTRY_ALREADY_EXISTS"

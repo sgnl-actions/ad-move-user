@@ -4,10 +4,15 @@ Move a user to a new parent container/OU in Active Directory via LDAP/LDAPS.
 
 ## Overview
 
-This action moves AD users using the LDAP `modifyDN` operation with support for:
-- User lookup by sAMAccountName
-- Optional renaming during move
-- Dry run mode for validation
+This action moves AD users using the LDAP `modifyDN` operation. It first looks up the user by their `sAMAccountName`, resolves their Distinguished Name, then performs the move to the specified target OU/container. The action supports comprehensive error handling through the enhanced SGNL testing framework.
+
+Key capabilities:
+- **User lookup by sAMAccountName**: Searches the base DN to resolve the user's Distinguished Name
+- **Idempotent operations**: AD accepts move to the same location as a no-op, returning success
+- **Optional renaming during move**: Rename the user's CN as part of the move operation
+- **Dry run mode**: Validate parameters without making changes to Active Directory
+- **LDAP filter escaping**: Prevents injection via special characters in sAMAccountName
+- **Comprehensive testing**: Scenario-based testing framework with full ldapts mocking and 10 test scenarios
 
 ## Prerequisites
 
@@ -149,9 +154,20 @@ npm install
 
 ### Run tests
 
+This action uses the enhanced SGNL testing framework with comprehensive LDAP mocking support. All 10 test scenarios validate user moving, idempotency, error handling, and dry run behavior:
+
 ```bash
 npm test
 ```
+
+The test suite includes:
+- Successful move of a user to a new OU
+- Idempotent behavior when moving to the same OU
+- Entry already exists at target handling
+- User not found handling
+- Authentication and permission failure handling
+- Dry run validation
+- Missing required parameter validation (baseDN, samAccountName, newParentDN)
 
 ### Run tests in watch mode
 
@@ -180,13 +196,26 @@ npm run lint:fix
 
 ### Local testing
 
-Create a `../.env` file with your AD credentials:
+Copy the sample environment file and configure with your AD credentials:
+
+```bash
+cp .env.sample .env
+```
+
+Then edit `.env` with your actual values:
 
 ```
 AD_ADDRESS=ldap://your-dc.example.com:389
 LDAP_BIND_DN=CN=admin,DC=example,DC=com
 LDAP_BIND_PASSWORD=your-password
 TLS_SKIP_VERIFY=false
+
+# Test parameters - customize as needed
+BASE_DN=DC=corp,DC=example,DC=com
+SAM_ACCOUNT_NAME=jdoe
+NEW_PARENT_DN=OU=DisabledUsers,DC=corp,DC=example,DC=com
+NEW_NAME=
+DRY_RUN=false
 ```
 
 Then run:
@@ -242,6 +271,7 @@ Get-ADUser -Identity "jdoe" | Select-Object DistinguishedName
 
 ## Support
 
-- [ldapts Documentation](https://github.com/ldapts/ldapts)
+- [ldapts Documentation](https://github.com/ldapts/ldapts) - LDAP client library used for Active Directory operations
+- [SGNL Testing Framework](https://github.com/sgnl-actions/testing) - Enhanced testing with LDAP mocking capabilities
 - [Active Directory LDAP Reference](https://docs.microsoft.com/en-us/windows/win32/ad/active-directory-domain-services)
 - [SGNL Actions Documentation](https://github.com/sgnl-actions)

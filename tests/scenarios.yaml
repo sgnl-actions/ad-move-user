@@ -1,0 +1,194 @@
+action:
+  params:
+    baseDN: "OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+    samAccountName: jdoe
+    newParentDN: "OU=DisabledUsers,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+  context:
+    secrets:
+      LDAP_BIND_DN: "CN=svc-sgnl,OU=Service Accounts,DC=adaptertest,DC=sgnl,DC=ai"
+      LDAP_BIND_PASSWORD: test-password
+    environment:
+      ADDRESS: "ldap://ad.corp.example.com:389"
+
+scenarios:
+  - name: successfully moves user to new OU
+    steps:
+      - ldap:
+          operation: bind
+          bindDN: "CN=svc-sgnl,OU=Service Accounts,DC=adaptertest,DC=sgnl,DC=ai"
+          password: "[MASKED]"
+        fixture: fixtures/200-bind-success.ldap
+      - ldap:
+          operation: search
+          baseDN: "OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+          scope: sub
+          filter: "(&(objectClass=user)(sAMAccountName=jdoe))"
+          attributes: ["distinguishedName"]
+        fixture: fixtures/200-search-user-found.ldap
+      - ldap:
+          operation: modifyDN
+          dn: "CN=John Doe,OU=Users,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+          newDN: "CN=John Doe,OU=DisabledUsers,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+        fixture: fixtures/200-modifydn-success.ldap
+      - ldap:
+          operation: unbind
+        fixture: fixtures/200-unbind-success.ldap
+    invoke:
+      returns:
+        status: success
+        userDN: "CN=John Doe,OU=Users,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+        previousDN: "CN=John Doe,OU=Users,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+        newDN: "CN=John Doe,OU=DisabledUsers,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+        moved: true
+        renamed: false
+        address: "ldap://ad.corp.example.com:389"
+
+  - name: move user to same OU (idempotent)
+    steps:
+      - ldap:
+          operation: bind
+          bindDN: "CN=svc-sgnl,OU=Service Accounts,DC=adaptertest,DC=sgnl,DC=ai"
+          password: "[MASKED]"
+        fixture: fixtures/200-bind-success.ldap
+      - ldap:
+          operation: search
+          baseDN: "OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+          scope: sub
+          filter: "(&(objectClass=user)(sAMAccountName=jdoe))"
+          attributes: ["distinguishedName"]
+        fixture: fixtures/200-search-user-found.ldap
+      - ldap:
+          operation: modifyDN
+          dn: "CN=John Doe,OU=Users,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+          newDN: "CN=John Doe,OU=DisabledUsers,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+        fixture: fixtures/200-modifydn-success.ldap
+      - ldap:
+          operation: unbind
+        fixture: fixtures/200-unbind-success.ldap
+    invoke:
+      returns:
+        status: success
+        moved: true
+        renamed: false
+        address: "ldap://ad.corp.example.com:389"
+
+  - name: entry already exists at target
+    steps:
+      - ldap:
+          operation: bind
+          bindDN: "CN=svc-sgnl,OU=Service Accounts,DC=adaptertest,DC=sgnl,DC=ai"
+          password: "[MASKED]"
+        fixture: fixtures/200-bind-success.ldap
+      - ldap:
+          operation: search
+          baseDN: "OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+          scope: sub
+          filter: "(&(objectClass=user)(sAMAccountName=jdoe))"
+          attributes: ["distinguishedName"]
+        fixture: fixtures/200-search-user-found.ldap
+      - ldap:
+          operation: modifyDN
+          dn: "CN=John Doe,OU=Users,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+          newDN: "CN=John Doe,OU=DisabledUsers,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+        fixture: fixtures/68-already-exists.ldap
+      - ldap:
+          operation: unbind
+        fixture: fixtures/200-unbind-success.ldap
+    invoke:
+      throws: "ENTRY_ALREADY_EXISTS"
+
+  - name: user not found
+    params:
+      samAccountName: nonexistent
+    steps:
+      - ldap:
+          operation: bind
+          bindDN: "CN=svc-sgnl,OU=Service Accounts,DC=adaptertest,DC=sgnl,DC=ai"
+          password: "[MASKED]"
+        fixture: fixtures/200-bind-success.ldap
+      - ldap:
+          operation: search
+          baseDN: "OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+          scope: sub
+          filter: "(&(objectClass=user)(sAMAccountName=nonexistent))"
+          attributes: ["distinguishedName"]
+        fixture: fixtures/200-search-user-not-found.ldap
+      - ldap:
+          operation: unbind
+        fixture: fixtures/200-unbind-success.ldap
+    invoke:
+      throws: "User not found with sAMAccountName: nonexistent"
+
+  - name: authentication failed
+    steps:
+      - ldap:
+          operation: bind
+          bindDN: "CN=svc-sgnl,OU=Service Accounts,DC=adaptertest,DC=sgnl,DC=ai"
+          password: "[MASKED]"
+        fixture: fixtures/49-invalid-credentials.ldap
+      - ldap:
+          operation: unbind
+        fixture: fixtures/200-unbind-success.ldap
+    invoke:
+      throws: "INVALID_CREDENTIALS"
+
+  - name: insufficient permissions on move
+    steps:
+      - ldap:
+          operation: bind
+          bindDN: "CN=svc-sgnl,OU=Service Accounts,DC=adaptertest,DC=sgnl,DC=ai"
+          password: "[MASKED]"
+        fixture: fixtures/200-bind-success.ldap
+      - ldap:
+          operation: search
+          baseDN: "OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+          scope: sub
+          filter: "(&(objectClass=user)(sAMAccountName=jdoe))"
+          attributes: ["distinguishedName"]
+        fixture: fixtures/200-search-user-found.ldap
+      - ldap:
+          operation: modifyDN
+          dn: "CN=John Doe,OU=Users,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+        fixture: fixtures/50-insufficient-access.ldap
+      - ldap:
+          operation: unbind
+        fixture: fixtures/200-unbind-success.ldap
+    invoke:
+      throws: "INSUFFICIENT_ACCESS_RIGHTS"
+
+  - name: dry run mode
+    params:
+      dry_run: true
+    steps: []
+    invoke:
+      returns:
+        status: dry_run_completed
+        baseDN: "OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+        samAccountName: jdoe
+        userDN: null
+        previousDN: null
+        newDN: null
+        newParentDN: "OU=DisabledUsers,OU=adaptertest,DC=adaptertest,DC=sgnl,DC=ai"
+        moved: false
+        renamed: false
+
+  - name: missing baseDN
+    params:
+      baseDN: ""
+    steps: []
+    invoke:
+      throws: "baseDN is required"
+
+  - name: missing samAccountName
+    params:
+      samAccountName: ""
+    steps: []
+    invoke:
+      throws: "samAccountName is required"
+
+  - name: missing newParentDN
+    params:
+      newParentDN: ""
+    steps: []
+    invoke:
+      throws: "newParentDN is required"

@@ -1,0 +1,5 @@
+# LDAP modifyDN operation - successful move
+operation: modifyDN
+result: success
+code: 0
+message: "OK"
