@@ -66,7 +66,7 @@ The script extracts and preserves the RDN prefix:
 
 The action reads configuration from context:
 - `context.environment.ADDRESS`: LDAP server URL
-- `context.environment.TLS_SKIP_VERIFY`: Skip TLS verification
+- `params.tlsSkipVerify`: Skip TLS verification (input parameter)
 - `context.secrets.LDAP_BIND_DN`: Bind account DN
 - `context.secrets.LDAP_BIND_PASSWORD`: Bind account password
 
