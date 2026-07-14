@@ -33,7 +33,6 @@ Key capabilities:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ADDRESS` | LDAP/LDAPS URL of the Domain Controller (e.g., `ldaps://dc.example.com:636`) | Required |
-| `TLS_SKIP_VERIFY` | Set to `true` to skip TLS certificate verification | `false` |
 
 ### Input Parameters
 
@@ -44,6 +43,7 @@ Key capabilities:
 | `newParentDN` | text | Yes | Target container/OU DN to move the user into | `OU=DisabledUsers,DC=corp,DC=example,DC=com` |
 | `newName` | text | No | New name for the user (without prefix). If omitted, keeps current name | `John Doe (Disabled)` |
 | `dry_run` | boolean | No | Validate without making changes | `true` |
+| `tlsSkipVerify` | boolean | No | Skip TLS certificate verification (use only for self-signed certificates) | `true` |
 | `address` | text | No | Optional LDAP server URL override | `ldaps://ad.corp.example.com:636` |
 
 ### Output
@@ -98,13 +98,12 @@ Result: User moved to `CN=John Doe (Disabled),OU=DisabledUsers,DC=corp,DC=exampl
 
 ### Skip TLS Verification
 
-For development or self-signed certificate environments:
+For development or self-signed certificate environments, add `tlsSkipVerify` to your script inputs:
 
 ```json
 {
-  "environment": {
-    "ADDRESS": "ldaps://dc.dev.example.com:636",
-    "TLS_SKIP_VERIFY": "true"
+  "script_inputs": {
+    "tlsSkipVerify": true
   }
 }
 ```
@@ -138,7 +137,7 @@ For development or self-signed certificate environments:
 ## Security Considerations
 
 - Use LDAPS (port 636) in production to encrypt credentials and data in transit
-- Only skip TLS verification (`TLS_SKIP_VERIFY=true`) in development environments
+- Only set \`tlsSkipVerify: true\` in development environments
 - The service account should have minimal permissions — only the ability to move objects between the relevant containers/OUs
 - Bind credentials are provided via secrets and are never logged
 - Connections are unbound in a `finally` block to prevent resource leaks
@@ -208,7 +207,7 @@ Then edit `.env` with your actual values:
 AD_ADDRESS=ldap://your-dc.example.com:389
 LDAP_BIND_DN=CN=admin,DC=example,DC=com
 LDAP_BIND_PASSWORD=your-password
-TLS_SKIP_VERIFY=false
+TLS_SKIP_VERIFY=false  # Used as tlsSkipVerify input parameter
 
 # Test parameters - customize as needed
 BASE_DN=DC=corp,DC=example,DC=com
@@ -230,7 +229,7 @@ npm run dev
 
 - Verify the Domain Controller is reachable: `telnet dc.example.com 636`
 - Check that the `ADDRESS` environment variable includes the protocol and port: `ldaps://dc.example.com:636`
-- For LDAPS, ensure the DC's certificate is trusted or set `TLS_SKIP_VERIFY=true` for testing
+- For LDAPS, ensure the DC's certificate is trusted or set `tlsSkipVerify: true` in inputs for testing
 
 ### Authentication Failures
 
